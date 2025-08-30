@@ -15,9 +15,12 @@ LOG_FILE_PATH = os.path.join(log_path, LOG_FILE)
 # Configure logging
 logging.basicConfig(
     filename=LOG_FILE_PATH,
-    format="[%(asctime)s] %(lineno)d %(name)s - %(levelname)s - %(message)s",
+    format="[%(asctime)s] %(levelname)s [%(name)s:%(lineno)d] - %(message)s",
     level=logging.INFO,
 )
 
+logger = logging.getLogger(__name__)
+
 if __name__ == "__main__":
-    logging.info("Logging has started successfully!")
+    logger.info("✅ Logging has started successfully!")
+    print(f"Logs are being saved to: {LOG_FILE_PATH}")
