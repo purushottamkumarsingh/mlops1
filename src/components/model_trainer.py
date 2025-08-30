@@ -1,31 +1,30 @@
 import os
 import sys
-from dataclasses import dataclass
-
+import numpy as np
+import pandas as pd
 from sklearn.linear_model import LinearRegression, Ridge, Lasso
 from sklearn.tree import DecisionTreeRegressor
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, AdaBoostRegressor
-from sklearn.metrics import r2_score
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.metrics import r2_score, mean_squared_error
+from sklearn.model_selection import GridSearchCV
 from xgboost import XGBRegressor
 from catboost import CatBoostRegressor
-
 from src.exception import CustomException
-from src.logger import logger
-from src.utils import save_object, evaluate_models
+from src.logger import logging
+from src.utils import save_object
 
 
-@dataclass
 class ModelTrainerConfig:
-    trained_model_file_path: str = os.path.join("artifacts", "model.pkl")
+    trained_model_file_path = os.path.join("artifacts", "model.pkl")
 
 
 class ModelTrainer:
     def __init__(self):
         self.model_trainer_config = ModelTrainerConfig()
 
-    def initiate_model_training(self, train_array, test_array):
+    def initiate_model_trainer(self, train_array, test_array):
         try:
-            logger.info("Splitting training and test input data")
+            logging.info("Splitting training and test input data")
 
             X_train, y_train, X_test, y_test = (
                 train_array[:, :-1],
@@ -41,57 +40,93 @@ class ModelTrainer:
                 "Decision Tree": DecisionTreeRegressor(),
                 "Random Forest": RandomForestRegressor(),
                 "Gradient Boosting": GradientBoostingRegressor(),
-                "AdaBoost": AdaBoostRegressor(),
                 "XGBoost": XGBRegressor(),
                 "CatBoost": CatBoostRegressor(verbose=0),
             }
 
             params = {
-                "Linear Regression": {},
-                "Ridge": {"alpha": [0.1, 1.0, 10]},
-                "Lasso": {"alpha": [0.1, 1.0, 10]},
-                "Decision Tree": {"max_depth": [3, 5, 7]},
-                "Random Forest": {"n_estimators": [50, 100]},
-                "Gradient Boosting": {"n_estimators": [50, 100]},
-                "AdaBoost": {"n_estimators": [50, 100]},
-                "XGBoost": {"n_estimators": [50, 100]},
-                "CatBoost": {"depth": [6, 8], "learning_rate": [0.01, 0.1]},
+                "Decision Tree": {
+                    "criterion": ["squared_error", "friedman_mse", "absolute_error"]
+                },
+                "Random Forest": {
+                    "n_estimators": [50, 100, 200],
+                    "max_depth": [None, 10, 20],
+                },
+                "Gradient Boosting": {
+                    "n_estimators": [50, 100],
+                    "learning_rate": [0.01, 0.1, 0.2],
+                    "subsample": [0.8, 1.0],
+                },
+                "XGBoost": {
+                    "n_estimators": [50, 100],
+                    "learning_rate": [0.01, 0.1, 0.2],
+                    "max_depth": [3, 6, 10],
+                },
+                "CatBoost": {
+                    "iterations": [50, 100],
+                    "learning_rate": [0.01, 0.1],
+                    "depth": [6, 8, 10],
+                },
             }
 
-            logger.info("Training multiple models with hyperparameter tuning")
-            model_report = evaluate_models(X_train, y_train, X_test, y_test, models, params)
+            model_report = {}
+            best_model_name = None
+            best_model_score = -np.inf
+            best_model = None
 
-            best_model_score = max(model_report.values())
-            best_model_name = max(model_report, key=model_report.get)
-            best_model = models[best_model_name]
+            # Train & evaluate models
+            for model_name, model in models.items():
+                logging.info(f"Training {model_name}...")
 
-            logger.info(f"Best model found: {best_model_name} with R² score: {best_model_score}")
+                if model_name in params:
+                    gs = GridSearchCV(model, params[model_name], cv=3, n_jobs=-1, scoring="r2")
+                    gs.fit(X_train, y_train)
+                    model = gs.best_estimator_
+                else:
+                    model.fit(X_train, y_train)
+
+                y_train_pred = model.predict(X_train)
+                y_test_pred = model.predict(X_test)
+
+                train_score = r2_score(y_train, y_train_pred)
+                test_score = r2_score(y_test, y_test_pred)
+
+                model_report[model_name] = test_score
+
+                logging.info(f"{model_name} → Train R2: {train_score:.4f}, Test R2: {test_score:.4f}")
+
+                if test_score > best_model_score:
+                    best_model_score = test_score
+                    best_model_name = model_name
+                    best_model = model
+
+            logging.info(f"Best model: {best_model_name} with R2: {best_model_score:.4f}")
 
             if best_model_score < 0.6:
-                raise CustomException("No suitable model found with R² > 0.6", sys)
+                raise CustomException("No suitable model found with R2 >= 0.6")
 
             save_object(
                 file_path=self.model_trainer_config.trained_model_file_path,
                 obj=best_model,
             )
 
-            logger.info(f"Model saved at {self.model_trainer_config.trained_model_file_path}")
+            logging.info("Best model saved successfully.")
 
-            predicted = best_model.predict(X_test)
-            r2 = r2_score(y_test, predicted)
-
-            return r2
+            return best_model_name, best_model_score
 
         except Exception as e:
             raise CustomException(e, sys)
 
 
 if __name__ == "__main__":
-    import numpy as np
+    from src.components.data_transformation import DataTransformation
 
-    train_array = np.load(os.path.join("artifacts", "train_array.npy"))
-    test_array = np.load(os.path.join("artifacts", "test_array.npy"))
+    obj = DataTransformation()
+    train_arr, test_arr, _ = obj.initiate_data_transformation(
+        os.path.join("artifacts", "train.csv"),
+        os.path.join("artifacts", "test.csv"),
+    )
 
     trainer = ModelTrainer()
-    r2 = trainer.initiate_model_training(train_array, test_array)
-    print("Final R² score on test data:", r2)
+    model_name, score = trainer.initiate_model_trainer(train_arr, test_arr)
+    print(f"✅ Best model: {model_name} with R2 score: {score:.4f}")

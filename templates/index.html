@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Student Score Prediction</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Predict Student Math Score</h1>
+        <form action="/predict" method="POST">
+            <input type="text" name="gender" placeholder="Gender" required>
+            <input type="text" name="race/ethnicity" placeholder="Race/Ethnicity" required>
+            <input type="text" name="parental level of education" placeholder="Parental Education" required>
+            <input type="text" name="lunch" placeholder="Lunch Type" required>
+            <input type="text" name="test preparation course" placeholder="Test Preparation" required>
+            <input type="number" name="reading score" placeholder="Reading Score" required>
+            <input type="number" name="writing score" placeholder="Writing Score" required>
+            <button type="submit">Predict</button>
+        </form>
+        {% if prediction_text %}
+            <h2>{{ prediction_text }}</h2>
+        {% endif %}
+    </div>
+</body>
+</html>

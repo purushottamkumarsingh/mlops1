@@ -1,57 +1,62 @@
 import os
 import sys
+import dill
 import pickle
-from sklearn.model_selection import GridSearchCV
-from sklearn.metrics import r2_score
-
+import numpy as np
+from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 from src.exception import CustomException
-from src.logger import logger
-
+from src.logger import logging
 
 def save_object(file_path, obj):
+    """
+    Saves any Python object (model, preprocessor, etc.) using dill.
+    """
     try:
         dir_path = os.path.dirname(file_path)
         os.makedirs(dir_path, exist_ok=True)
 
         with open(file_path, "wb") as file_obj:
-            pickle.dump(obj, file_obj)
+            dill.dump(obj, file_obj)
 
-        logger.info(f"Object saved successfully at {file_path}")
+        logging.info(f"Object saved at: {file_path}")
 
     except Exception as e:
         raise CustomException(e, sys)
 
 
 def load_object(file_path):
+    """
+    Loads a Python object (model, preprocessor, etc.) saved with dill.
+    """
     try:
         with open(file_path, "rb") as file_obj:
-            return pickle.load(file_obj)
+            return dill.load(file_obj)
+
     except Exception as e:
         raise CustomException(e, sys)
 
 
-def evaluate_models(X_train, y_train, X_test, y_test, models, params):
+def evaluate_models(X_train, y_train, X_test, y_test, models: dict):
+    """
+    Train and evaluate multiple models.
+    Returns a dictionary {model_name: R2_score}.
+    """
     try:
         report = {}
 
         for model_name, model in models.items():
-            logger.info(f"Training {model_name} with GridSearchCV")
+            logging.info(f"Training {model_name}")
+            model.fit(X_train, y_train)
 
-            param_grid = params.get(model_name, {})
+            y_pred = model.predict(X_test)
 
-            gs = GridSearchCV(model, param_grid, cv=3, scoring="r2", n_jobs=-1, verbose=0)
-            gs.fit(X_train, y_train)
+            r2 = r2_score(y_test, y_pred)
+            mae = mean_absolute_error(y_test, y_pred)
+            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
 
-            best_model = gs.best_estimator_
-            best_model.fit(X_train, y_train)
+            report[model_name] = r2
 
-            y_pred = best_model.predict(X_test)
-            score = r2_score(y_test, y_pred)
-
-            report[model_name] = score
-            logger.info(f"{model_name}: R² Score = {score}")
-
-            models[model_name] = best_model
+            logging.info(f"{model_name} -> R2: {r2:.4f}, MAE: {mae:.4f}, RMSE: {rmse:.4f}")
 
         return report
 
